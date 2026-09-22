@@ -1,0 +1,80 @@
+# Virtual environment
+venv/
+env/
+.venv/
+.env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+*.whl
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Data & Models (large files)
+data/raw/
+data/processed/
+models/checkpoints/
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+
+# Logs & Outputs
+logs/
+runs/
+outputs/
+wandb/
+mlruns/
+lightning_logs/
+
+# Environment variables & secrets
+.env
+.env.local
+*.key
+*.pem
+secrets.yaml
+secrets.json
+
+# Distribution / packaging
+*.tar.gz
+*.zip
+
+# Coverage & Testing
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+
+# MyPy
+.mypy_cache/
