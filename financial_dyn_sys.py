@@ -4,56 +4,86 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-def analyze_and_plot(data_series, axes, title_prefix, ylabel):
-    # Formulate a simple discrete dynamical system (AR(1) process):
-    # Dynamical Rule: x(t) = a * x(t-1) + b
-    x_t_minus_1 = data_series.values[:-1]
-    x_t = data_series.values[1:]
+def koopman_dmd_analysis(data_series, axes, title_prefix, ylabel, delay_dim=10, rank=5):
+    """
+    Applies Hankel Dynamic Mode Decomposition (Hankel-DMD) to approximate 
+    the Koopman Operator for a 1D financial time series.
+    """
+    data = data_series.values
+    N = len(data)
+    
+    if N < delay_dim + 2:
+        print("Not enough data for this delay dimension.")
+        return
 
-    # Use numpy polyfit to find the parameters 'a' (slope) and 'b' (intercept)
-    a, b = np.polyfit(x_t_minus_1, x_t, 1)
+    # 1. Time-delay embedding to construct Hankel matrix (observables)
+    X = np.array([data[i:N-delay_dim+i+1] for i in range(delay_dim)])
     
-    print(f"\n[{title_prefix}] Estimated Dynamical System:")
-    print(f"x(t) = {a:.4f} * x(t-1) + {b:.4f}")
+    # Snapshot matrices
+    X_1 = X[:, :-1]
+    X_2 = X[:, 1:]
     
-    # Calculate the fixed point (equilibrium) where x(t) = x(t-1) = x*
-    fixed_point = None
-    if abs(a - 1) > 1e-5:
-        fixed_point = b / (1 - a)
-        print(f"Fixed Point (Equilibrium): {fixed_point:.6f}")
-    else:
-        print("System is a random walk (a ~ 1), no single fixed point.")
+    # 2. Singular Value Decomposition (SVD) on X_1
+    U, S, Vh = np.linalg.svd(X_1, full_matrices=False)
     
-    # Generate the deterministic part of the system
-    x_t_predicted = a * x_t_minus_1 + b
-
+    # Truncate to desired rank
+    r = min(rank, len(S))
+    Ur = U[:, :r]
+    Sr = np.diag(S[:r])
+    Vr = Vh[:r, :].T
+    
+    # 3. Approximate the Koopman Operator (K_tilde) in reduced space
+    K_tilde = Ur.T @ X_2 @ Vr @ np.linalg.inv(Sr)
+    
+    # 4. Koopman Eigenvalues
+    eigenvalues, eigenvectors = np.linalg.eig(K_tilde)
+    
+    # 5. Reconstruct state transitions using the full Koopman approximation
+    X_2_pred = Ur @ K_tilde @ Ur.T @ X_1
+    
+    # We plot the latest point in the delay vector (current time step)
+    actual_current_state = X_2[-1, :]
+    pred_current_state = X_2_pred[-1, :].real
+    
+    # Time vector for plotting
+    dates = data_series.index[delay_dim:]
+    
     # Subplot 1: Time series
-    dates = data_series.index[1:]
-    axes[0].plot(dates, x_t, label=f'Actual {ylabel} $x(t)$', alpha=0.6, color='blue')
-    axes[0].plot(dates, x_t_predicted, label='System Model Output', alpha=0.8, color='red', linestyle='--')
+    axes[0].plot(dates, actual_current_state, label=f'Actual {ylabel}', alpha=0.6, color='blue')
+    axes[0].plot(dates, pred_current_state, label='Koopman DMD Output', alpha=0.8, color='red', linestyle='--')
     axes[0].set_title(f'Time Series: {title_prefix}')
     axes[0].set_ylabel(ylabel)
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
-
-    # Subplot 2: Phase space
-    axes[1].scatter(x_t_minus_1, x_t, alpha=0.5, color='purple', s=15, label='State Transitions')
     
-    # Plot the line of best fit (our dynamical system mapping)
-    x_range = np.linspace(min(x_t_minus_1), max(x_t_minus_1), 100)
-    axes[1].plot(x_range, a * x_range + b, color='red', label=f'Mapping: x(t) = {a:.3f}x(t-1) + {b:.3f}')
+    # Subplot 2: Koopman Spectrum (Eigenvalues on Complex Plane)
+    theta = np.linspace(0, 2*np.pi, 100)
+    axes[1].plot(np.cos(theta), np.sin(theta), color='black', linestyle=':', label='Unit Circle')
+    axes[1].scatter(eigenvalues.real, eigenvalues.imag, color='purple', s=50, label='Koopman Eigenvalues', zorder=5)
     
-    # Plot y = x line
-    axes[1].plot(x_range, x_range, color='black', linestyle=':', label='Identity (y=x)')
+    # Add stability region lines
+    axes[1].axhline(0, color='gray', linewidth=0.5)
+    axes[1].axvline(0, color='gray', linewidth=0.5)
     
-    if fixed_point is not None and min(x_t_minus_1) <= fixed_point <= max(x_t_minus_1):
-        axes[1].scatter([fixed_point], [fixed_point], color='green', s=100, zorder=5, label=f'Fixed Point ({fixed_point:.4f})')
-        
-    axes[1].set_title(f'Phase Portrait: {title_prefix}')
-    axes[1].set_xlabel('State at t-1: $x(t-1)$')
-    axes[1].set_ylabel('State at t: $x(t)$')
+    axes[1].set_aspect('equal')
+    axes[1].set_title(f'Koopman Spectrum: {title_prefix}')
+    axes[1].set_xlabel('Real')
+    axes[1].set_ylabel('Imaginary')
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
+    
+    print(f"\n[{title_prefix}] Koopman Operator Analysis (Hankel-DMD):")
+    print(f"  Time-delay dimension (Observables): {delay_dim}")
+    print(f"  Truncated rank: {r}")
+    
+    # Sort eigenvalues by magnitude
+    sorted_idx = np.argsort(-np.abs(eigenvalues))
+    top_evals = eigenvalues[sorted_idx][:3]
+    print(f"  Top Koopman Eigenvalues:")
+    for i, ev in enumerate(top_evals):
+        mag = np.abs(ev)
+        stability = "Growing" if mag > 1.001 else ("Decaying" if mag < 0.999 else "Stable/Oscillatory")
+        print(f"    {i+1}: {ev:.4f}  (Magnitude: {mag:.4f} -> {stability})")
 
 def main():
     ticker = "AAPL"
@@ -70,14 +100,14 @@ def main():
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-    # Analysis 1: Log Returns
-    analyze_and_plot(returns, axes[0], f"{ticker} Log Returns", "Log Return")
+    # Analysis 1: Log Returns using Koopman DMD
+    koopman_dmd_analysis(returns, axes[0], f"{ticker} Log Returns", "Log Return", delay_dim=10, rank=5)
     
-    # Analysis 2: Actual Prices
-    analyze_and_plot(close_prices, axes[1], f"{ticker} Actual Prices", "Price (USD)")
+    # Analysis 2: Actual Prices using Koopman DMD
+    koopman_dmd_analysis(close_prices, axes[1], f"{ticker} Actual Prices", "Price (USD)", delay_dim=10, rank=5)
 
     plt.tight_layout()
-    output_img = 'dynamical_system_phase_portrait.png'
+    output_img = 'koopman_phase_portrait.png'
     plt.savefig(output_img, dpi=300)
     print(f"\nPlot saved successfully as '{os.path.abspath(output_img)}'")
 
